@@ -87,10 +87,17 @@ The codebase currently includes:
 - **CALDERA baseline** (rank-128)
 - **Unquantized (FP16) baseline**
 
+### Current Implementation
+
+The codebase currently includes:
+- **Baseline PTQ pipelines** based on QuIP# (LLaMA-2 7B)
+- **CALDERA baseline** (rank-128)
+- **Unquantized (FP16) baseline**
+- **✅ Convex-CALDERA** (both penalty and constrained forms) - **NEW!**
+
 ### To-Do (In Progress)
 
 - [ ] Implement SCL Library baselines for Lossy Compression and Quantization
-- [ ] Implement Convex-CALDERA (rank-128) end-to-end: CVXPY/exp-cone solver, rounding-and-repair module, low-rank SVD factorization + truncated reconstruction
 - [ ] Prepare final report + plots for EE274
 
 ## Usage
@@ -142,12 +149,82 @@ caldera_decom = caldera(
 W_compressed = caldera_decom.Q + caldera_decom.L @ caldera_decom.R
 ```
 
+### Convex-CALDERA Example
+
+The new Convex-CALDERA algorithm supports both **penalty form** and **constrained form**:
+
+```python
+import torch
+from src.caldera.decomposition.convex_caldera import (
+    convex_caldera,
+    ConvexCalderaParams
+)
+from src.caldera.utils.metrics import evaluate_compression
+
+# Load weight matrix
+W = model.layers[0].mlp.gate_proj.weight.data
+H = torch.eye(W.shape[1])  # Hessian (or use precomputed)
+
+# Option 1: Penalty form (with μ)
+params_penalty = ConvexCalderaParams(
+    B_tot=2.0,          # Target 2 bits per parameter
+    b_min=2.0,
+    b_max=8.0,
+    mu=0.1,             # Nuclear norm penalty weight
+    tau_star=None,      # Not using constrained form
+    lambda_reg=0.01,
+    discrete_bits=[2, 3, 4, 8],
+    solver="SCS"
+)
+
+# Option 2: Constrained form (with τ*)
+params_constrained = ConvexCalderaParams(
+    B_tot=2.0,
+    b_min=2.0,
+    b_max=8.0,
+    tau_star=100.0,     # Nuclear norm bound
+    mu=None,            # Not using penalty form
+    discrete_bits=[2, 3, 4, 8],
+    solver="SCS"
+)
+
+# Run Convex-CALDERA
+decomp = convex_caldera(
+    W=W,
+    H=H,
+    params=params_penalty,
+    device="cuda"
+)
+
+# Get compressed weights
+W_compressed = decomp.W_compressed
+
+# Evaluate metrics
+metrics = evaluate_compression(
+    W_original=W,
+    W_compressed=W_compressed,
+    avg_bit_width=decomp.avg_bit_width,
+    effective_rank=decomp.effective_rank,
+    duality_gap=decomp.duality_gap
+)
+
+print(f"Bits per parameter: {metrics.bits_per_parameter:.3f}")
+print(f"Effective rank: {metrics.effective_rank:.2f}")
+print(f"Duality gap: {metrics.duality_gap:.4f}")
+print(f"Compression ratio: {metrics.compression_ratio:.2f}x")
+```
+
 ### Running Experiments
 
 See `main.py` for a complete example using the POPE dataset with LLaVA-OneVision models.
+See `convex_caldera_example.py` for Convex-CALDERA usage examples.
 
 ```bash
+# Run original CALDERA
 python main.py
+
+# Run Convex-CALDERA examples
+python convex_caldera_example.py
 ```
 
 ## Results
@@ -176,18 +253,35 @@ Performance on LLaMA-2 and LLaMA-3 models: perplexity (↓) and accuracy (↑) a
 
 ## Evaluation Metrics
 
-### Quantitative
-- Bits-per-parameter
-- Accuracy drop
-- Perplexity increase
-- Duality gap
-- Effective rank
+The codebase includes comprehensive evaluation metrics (see `src/caldera/utils/metrics.py`):
 
-### Qualitative
-- Bit allocation heatmaps
-- Accuracy vs. bits curves
-- Loss vs. rank curves
-- Singular value spectra
+### Quantitative Metrics
+- **Bits-per-parameter**: Accounts for both low-rank and quantized components
+- **Accuracy drop**: Difference between original and compressed model accuracy
+- **Perplexity increase**: Difference in perplexity scores
+- **Duality gap**: Optimality certificate from convex optimization
+- **Effective rank**: Rank of the low-rank component
+- **Relative error**: Frobenius norm error relative to original
+- **Compression ratio**: Ratio of original to compressed model size
+
+### Qualitative Metrics (Plotting Functions)
+- **Bit allocation heatmaps**: Visualize bit allocation across layers/groups
+- **Accuracy vs. bits curves**: Trade-off between compression and accuracy
+- **Loss vs. rank curves**: Impact of rank on reconstruction loss
+- **Singular value spectra**: Compare original vs compressed singular values
+
+Example usage:
+```python
+from src.caldera.utils.metrics import (
+    plot_bit_allocation_heatmap,
+    plot_accuracy_vs_bits,
+    plot_singular_value_spectra
+)
+
+# Generate plots
+plot_singular_value_spectra(sv_original, sv_compressed, save_path="plots/sv.png")
+plot_accuracy_vs_bits(bits_list, accuracy_list, save_path="plots/acc_vs_bits.png")
+```
 
 ## Related Work
 
