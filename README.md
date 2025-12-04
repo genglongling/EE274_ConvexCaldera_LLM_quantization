@@ -94,6 +94,7 @@ The codebase currently includes:
 - **CALDERA baseline** (rank-128)
 - **Unquantized (FP16) baseline**
 - **✅ Convex-CALDERA** (both penalty and constrained forms) - **NEW!**
+- **✅ SCL Library baselines** (scalar, Lloyd-Max, vector quantization) - **NEW!**
 
 ### To-Do (In Progress)
 
@@ -213,10 +214,66 @@ print(f"Duality gap: {metrics.duality_gap:.4f}")
 print(f"Compression ratio: {metrics.compression_ratio:.2f}x")
 ```
 
+### SCL Library Baselines Example
+
+The SCL baselines provide classical quantization methods for comparison:
+
+```python
+import torch
+from src.caldera.utils.scl_baselines import (
+    scl_quantize,
+    SCLQuantizationParams
+)
+
+# Load weight matrix
+W = model.layers[0].mlp.gate_proj.weight.data
+
+# Option 1: Scalar Uniform Quantization
+params_scalar = SCLQuantizationParams(
+    num_bits=2,
+    method="scalar",
+    distortion_metric="mse"
+)
+result_scalar = scl_quantize(W, params_scalar, device="cuda")
+
+# Option 2: Lloyd-Max Quantization (Optimal for MSE)
+params_lloyd = SCLQuantizationParams(
+    num_bits=2,
+    method="lloyd_max",
+    max_iterations=100,
+    distortion_metric="mse"
+)
+result_lloyd = scl_quantize(W, params_lloyd, device="cuda")
+
+# Option 3: Vector Quantization (K-means)
+params_vector = SCLQuantizationParams(
+    num_bits=2,
+    method="vector",
+    vector_dim=4,  # 4-dimensional vectors
+    max_iterations=100,
+    distortion_metric="mse"
+)
+result_vector = scl_quantize(W, params_vector, device="cuda")
+
+# Access results
+print(f"Rate: {result_lloyd.rate:.3f} bits/sample")
+print(f"Distortion (MSE): {result_lloyd.distortion:.6f}")
+print(f"Compression ratio: {result_lloyd.compression_ratio:.2f}x")
+
+# Use quantized weights
+W_compressed = result_lloyd.quantized
+```
+
+**SCL Baseline Methods:**
+- **`scalar`**: Uniform scalar quantization (fast, simple)
+- **`lloyd_max`**: Optimal scalar quantization using Lloyd-Max algorithm (iterative, better MSE)
+- **`vector`**: Vector quantization using K-means/Generalized Lloyd algorithm (exploits correlations)
+
 ### Running Experiments
 
 See `main.py` for a complete example using the POPE dataset with LLaVA-OneVision models.
 See `convex_caldera_example.py` for Convex-CALDERA usage examples.
+See `scl_baselines_example.py` for SCL baseline quantization methods.
 
 ```bash
 # Run original CALDERA
@@ -224,6 +281,9 @@ python main.py
 
 # Run Convex-CALDERA examples
 python convex_caldera_example.py
+
+# Run SCL baseline examples
+python scl_baselines_example.py
 ```
 
 ## Results
@@ -296,8 +356,15 @@ plot_accuracy_vs_bits(bits_list, accuracy_list, save_path="plots/acc_vs_bits.png
 - **HAWQ** [Dong et al., 2019]: Uses Hessian information for bit allocation
 - **CVXQ** [Frantar et al., 2022]: Formulates quantization as convex optimization
 
-### Stanford Compression Library (SCL)
+### Stanford Compression Library (SCL) Baselines
 The SCL provides foundational tools for classical lossy compression techniques, including scalar quantization, vector quantization, and rate–distortion–optimized quantizers. These methods serve as theoretically grounded baselines for understanding quantization effects on neural network weights.
+
+**Implemented SCL Baselines:**
+- **Scalar Uniform Quantization**: Independent quantization of each element
+- **Lloyd-Max Quantization**: Optimal scalar quantization for MSE distortion (iterative algorithm)
+- **Vector Quantization (K-means)**: Generalized Lloyd algorithm for vector quantization, exploiting correlations between dimensions
+
+See `scl_baselines_example.py` for usage examples.
 
 ## Citation
 
