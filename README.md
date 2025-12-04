@@ -97,7 +97,6 @@ The codebase currently includes:
 
 ### To-Do (In Progress)
 
-- [ ] Implement SCL Library baselines for Lossy Compression and Quantization
 - [ ] Prepare final report + plots for EE274
 
 ## Usage
