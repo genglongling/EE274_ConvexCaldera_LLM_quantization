@@ -53,14 +53,27 @@ pip install cvxpy
 EE274_ConvexCaldera_LLM_quantization/
 ├── main.py                          # Main script for quantization experiments
 ├── diag_Hessians.pt                 # Precomputed diagonal Hessians
+├── convex_caldera_example.py        # Convex-CALDERA usage examples
+├── scl_baselines_example.py         # SCL baseline quantization examples
 ├── rank-constrained-regression-main/
 │   ├── src/
-│   │   └── caldera/
+│   │   ├── caldera/                 # Original CALDERA package
+│   │   │   ├── decomposition/
+│   │   │   │   └── alg.py           # CALDERA decomposition algorithm
+│   │   │   └── utils/
+│   │   │       ├── dataclasses.py   # Parameter dataclasses
+│   │   │       ├── quantization.py # Quantization utilities
+│   │   │       ├── metrics.py      # Evaluation metrics
+│   │   │       └── scl_baselines.py # SCL baseline methods
+│   │   └── convex_caldera/          # New Convex-CALDERA package
 │   │       ├── decomposition/
-│   │       │   └── alg.py          # CALDERA decomposition algorithm
+│   │       │   ├── alg.py           # CALDERA algorithm (standalone)
+│   │       │   └── convex_caldera.py # Convex-CALDERA implementation
 │   │       └── utils/
-│   │           ├── dataclasses.py  # Parameter dataclasses
-│   │           └── quantization.py # Quantization utilities
+│   │           ├── dataclasses.py   # Parameter dataclasses
+│   │           ├── quantization.py  # Quantization utilities
+│   │           ├── metrics.py       # Evaluation metrics
+│   │           └── scl_baselines.py # SCL baseline methods
 │   ├── caldera_playbook.ipynb      # CALDERA usage examples
 │   └── README.md
 └── README.md                        # This file
@@ -102,14 +115,35 @@ The codebase currently includes:
 
 ## Usage
 
-### Basic Example
+This repository provides two packages for LLM weight compression:
+
+1. **`caldera`** - The original CALDERA algorithm package
+2. **`convex_caldera`** - The new Convex-CALDERA package with convex optimization formulation
+
+Both packages can be used independently. Choose the one that best fits your needs.
+
+---
+
+### Using the `caldera` Package
+
+The `caldera` package provides the original CALDERA algorithm for low-rank + quantization decomposition. This package contains only the original CALDERA implementation (not Convex-CALDERA).
+
+#### Setup
 
 ```python
+import sys
+sys.path.append('rank-constrained-regression-main')
+
 import torch
-from transformers import AutoModelForCausalLM
 from src.caldera.utils.dataclasses import CalderaParams
 from src.caldera.utils.quantization import QuantizerFactory
 from src.caldera.decomposition.alg import caldera
+```
+
+#### Basic CALDERA Example
+
+```python
+from transformers import AutoModelForCausalLM
 
 # Load model
 model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf")
@@ -149,18 +183,31 @@ caldera_decom = caldera(
 W_compressed = caldera_decom.Q + caldera_decom.L @ caldera_decom.R
 ```
 
-### Convex-CALDERA Example
+---
+
+### Using the `convex_caldera` Package
+
+The `convex_caldera` package is a standalone implementation of Convex-CALDERA with convex optimization formulation.
+
+#### Setup
+
+```python
+import sys
+sys.path.append('rank-constrained-regression-main')
+
+import torch
+from src.convex_caldera.decomposition.convex_caldera import (
+    convex_caldera,
+    ConvexCalderaParams
+)
+from src.convex_caldera.utils.metrics import evaluate_compression
+```
+
+#### Basic Convex-CALDERA Example
 
 The new Convex-CALDERA algorithm supports both **penalty form** and **constrained form**:
 
 ```python
-import torch
-from src.caldera.decomposition.convex_caldera import (
-    convex_caldera,
-    ConvexCalderaParams
-)
-from src.caldera.utils.metrics import evaluate_compression
-
 # Load weight matrix
 W = model.layers[0].mlp.gate_proj.weight.data
 H = torch.eye(W.shape[1])  # Hessian (or use precomputed)
@@ -214,16 +261,70 @@ print(f"Duality gap: {metrics.duality_gap:.4f}")
 print(f"Compression ratio: {metrics.compression_ratio:.2f}x")
 ```
 
-### SCL Library Baselines Example
+#### CALDERA from `convex_caldera` Package
 
-The SCL baselines provide classical quantization methods for comparison:
+The `convex_caldera` package also includes the CALDERA algorithm:
 
 ```python
-import torch
+from src.convex_caldera.decomposition.alg import caldera
+from src.convex_caldera.utils.dataclasses import CalderaParams
+from src.convex_caldera.utils.quantization import QuantizerFactory
+
+# Set up CALDERA parameters (same as above)
+quant_factory_Q = QuantizerFactory(method="uniform", block_size=64)
+quant_factory_LR = QuantizerFactory(method="uniform", block_size=64)
+
+quant_params = CalderaParams(
+    compute_quantized_component=True,
+    compute_low_rank_factors=True,
+    Q_bits=2,
+    L_bits=16,
+    R_bits=16,
+    rank=128,
+    iters=5,
+    lplr_iters=5,
+    activation_aware_LR=True,
+    update_order=["Q", "LR"],
+    quant_factory_Q=quant_factory_Q,
+    quant_factory_LR=quant_factory_LR,
+)
+
+# Apply CALDERA
+caldera_decom = caldera(
+    quant_params=quant_params,
+    W=W,
+    H=H,
+    device="cuda",
+    use_tqdm=True,
+)
+
+W_compressed = caldera_decom.Q + caldera_decom.L @ caldera_decom.R
+```
+
+### SCL Library Baselines
+
+The SCL baselines provide classical quantization methods for comparison. Available in both packages:
+
+**From `caldera` package:**
+```python
 from src.caldera.utils.scl_baselines import (
     scl_quantize,
     SCLQuantizationParams
 )
+```
+
+**From `convex_caldera` package:**
+```python
+from src.convex_caldera.utils.scl_baselines import (
+    scl_quantize,
+    SCLQuantizationParams
+)
+```
+
+#### Example Usage
+
+```python
+import torch
 
 # Load weight matrix
 W = model.layers[0].mlp.gate_proj.weight.data
@@ -312,7 +413,10 @@ Performance on LLaMA-2 and LLaMA-3 models: perplexity (↓) and accuracy (↑) a
 
 ## Evaluation Metrics
 
-The codebase includes comprehensive evaluation metrics (see `src/caldera/utils/metrics.py`):
+The codebase includes comprehensive evaluation metrics available in both packages:
+
+- **`src/caldera/utils/metrics.py`** - Metrics in the caldera package
+- **`src/convex_caldera/utils/metrics.py`** - Metrics in the convex_caldera package
 
 ### Quantitative Metrics
 - **Bits-per-parameter**: Accounts for both low-rank and quantized components
@@ -329,13 +433,21 @@ The codebase includes comprehensive evaluation metrics (see `src/caldera/utils/m
 - **Loss vs. rank curves**: Impact of rank on reconstruction loss
 - **Singular value spectra**: Compare original vs compressed singular values
 
-Example usage:
+Example usage (same for both packages):
 ```python
+# From caldera package
 from src.caldera.utils.metrics import (
     plot_bit_allocation_heatmap,
     plot_accuracy_vs_bits,
     plot_singular_value_spectra
 )
+
+# OR from convex_caldera package
+# from src.convex_caldera.utils.metrics import (
+#     plot_bit_allocation_heatmap,
+#     plot_accuracy_vs_bits,
+#     plot_singular_value_spectra
+# )
 
 # Generate plots
 plot_singular_value_spectra(sv_original, sv_compressed, save_path="plots/sv.png")
