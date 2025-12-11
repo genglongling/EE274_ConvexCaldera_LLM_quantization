@@ -67,7 +67,6 @@ EE274_ConvexCaldera_LLM_quantization/
 │   │   │       └── scl_baselines.py # SCL baseline methods
 │   │   └── convex_caldera/          # New Convex-CALDERA package
 │   │       ├── decomposition/
-│   │       │   ├── alg.py           # CALDERA algorithm (standalone)
 │   │       │   └── convex_caldera.py # Convex-CALDERA implementation
 │   │       └── utils/
 │   │           ├── dataclasses.py   # Parameter dataclasses
@@ -187,7 +186,7 @@ W_compressed = caldera_decom.Q + caldera_decom.L @ caldera_decom.R
 
 ### Using the `convex_caldera` Package
 
-The `convex_caldera` package is a standalone implementation of Convex-CALDERA with convex optimization formulation.
+The `convex_caldera` package is a standalone implementation of Convex-CALDERA with convex optimization formulation. This package contains only the Convex-CALDERA implementation (not the original CALDERA algorithm).
 
 #### Setup
 
@@ -259,46 +258,6 @@ print(f"Bits per parameter: {metrics.bits_per_parameter:.3f}")
 print(f"Effective rank: {metrics.effective_rank:.2f}")
 print(f"Duality gap: {metrics.duality_gap:.4f}")
 print(f"Compression ratio: {metrics.compression_ratio:.2f}x")
-```
-
-#### CALDERA from `convex_caldera` Package
-
-The `convex_caldera` package also includes the CALDERA algorithm:
-
-```python
-from src.convex_caldera.decomposition.alg import caldera
-from src.convex_caldera.utils.dataclasses import CalderaParams
-from src.convex_caldera.utils.quantization import QuantizerFactory
-
-# Set up CALDERA parameters (same as above)
-quant_factory_Q = QuantizerFactory(method="uniform", block_size=64)
-quant_factory_LR = QuantizerFactory(method="uniform", block_size=64)
-
-quant_params = CalderaParams(
-    compute_quantized_component=True,
-    compute_low_rank_factors=True,
-    Q_bits=2,
-    L_bits=16,
-    R_bits=16,
-    rank=128,
-    iters=5,
-    lplr_iters=5,
-    activation_aware_LR=True,
-    update_order=["Q", "LR"],
-    quant_factory_Q=quant_factory_Q,
-    quant_factory_LR=quant_factory_LR,
-)
-
-# Apply CALDERA
-caldera_decom = caldera(
-    quant_params=quant_params,
-    W=W,
-    H=H,
-    device="cuda",
-    use_tqdm=True,
-)
-
-W_compressed = caldera_decom.Q + caldera_decom.L @ caldera_decom.R
 ```
 
 ### SCL Library Baselines
